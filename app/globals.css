@@ -112,7 +112,7 @@ h1, h2, h3 {
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--gray-200);
 }
-.topbar-title { font-weight: 700; }
+.topbar-title { min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar-date { margin-left: auto; color: var(--gray-500); font-size: 0.85rem; }
 .menu-btn { display: none; }
 
@@ -428,7 +428,7 @@ textarea.input { resize: vertical; line-height: 1.5; }
 .modal-footer-inline { margin: 1.4rem -1.4rem -1.4rem; }
 
 /* ---------- Fleet ---------- */
-.bus-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.25rem; }
+.bus-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 1.25rem; }
 .bus-card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--gray-200); border-radius: var(--radius-lg); background: var(--white); box-shadow: var(--shadow-card); transition: var(--transition); }
 .bus-card:hover { box-shadow: var(--shadow-pop); border-color: var(--primary-200); }
 .bus-photo { position: relative; height: 170px; display: grid; place-items: center; background: var(--primary-50); color: var(--primary); font-size: 0.85rem; }
@@ -444,7 +444,7 @@ textarea.input { resize: vertical; line-height: 1.5; }
 .bus-actions .btn { margin-right: auto; }
 
 /* ---------- Bus type cards ---------- */
-.type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1.25rem; padding-top: 0.75rem; }
+.type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); gap: 1.25rem; padding-top: 0.75rem; }
 .type-card { position: relative; display: flex; flex-direction: column; gap: 0.5rem; padding: 1.4rem; border: 1px solid var(--gray-200); border-radius: var(--radius-lg); background: var(--white); box-shadow: var(--shadow-card); }
 .type-card h3 { font-size: 1.3rem; font-family: var(--font-serif); }
 .type-card ul { list-style: none; display: grid; gap: 0.4rem; margin: 0.5rem 0; font-size: 0.86rem; color: var(--gray-600); }
@@ -555,4 +555,66 @@ textarea.input { resize: vertical; line-height: 1.5; }
   .data-action { flex-direction: column; align-items: flex-start; }
   .pay-grid { grid-template-columns: 1fr 1fr; }
   .details-wide { grid-template-columns: 1fr; }
+
+  .topbar { height: 56px; }
+  .subtabs { top: 56px; }
+  .content { padding: 1rem 0.85rem; }
+  .card { padding: 1rem; margin-bottom: 1rem; }
+  .card-header-pad { padding: 1rem 1rem 0; }
+  .stack, .two-col, .detail-layout { gap: 1rem; }
+
+  /* Page header: actions drop under the title and share the width */
+  .page-header { align-items: stretch; flex-direction: column; margin-bottom: 1rem; }
+  .page-header-actions { flex-wrap: wrap; }
+  .page-header-actions > .btn { flex: 1 1 auto; }
+
+  /* Filters: full-width search, status pills scroll sideways instead of wrapping */
+  .toolbar { gap: 0.5rem; }
+  .search-box { flex-basis: 100%; }
+  .toolbar .input-auto { flex: 1 1 140px; }
+  .segmented { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+
+  .stat-grid { grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem; }
+  .stat-card { padding: 0.9rem; }
+  .stat-icon { width: 34px; height: 34px; margin-bottom: 0.4rem; }
+  .stat-value { font-size: 1.3rem; }
+  .bar-row { grid-template-columns: 76px 1fr 26px; gap: 0.5rem; }
+
+  /* Tables marked table-stack turn into one card per row, each value with its label */
+  .table-stack thead { display: none; }
+  .table-stack, .table-stack tbody, .table-stack tr, .table-stack td { display: block; width: 100%; }
+  .table-stack tbody { display: grid; gap: 0.6rem; padding: 0.75rem; }
+  .card:not(.card-flush) .table-stack tbody { padding: 0; }
+  .table-stack tr { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem 1rem; padding: 0.85rem; border: 1px solid var(--gray-200); border-radius: var(--radius); background: var(--white); }
+  .table-stack td, .card:not(.card-flush) .table-stack td:first-child { padding: 0; border: none; }
+  .table-stack td::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--gray-400); }
+  .table-stack td:not([data-label])::before { display: none; }
+  .table-stack td:first-child { grid-column: 1 / -1; padding-right: 2rem; }
+  .table-stack-arrow { position: absolute; top: 0.85rem; right: 0.85rem; width: auto !important; }
+
+  .bus-photo { height: 150px; }
+  .bus-actions { flex-wrap: wrap; }
+  .faq-item { gap: 0.75rem; padding: 0.9rem; flex-wrap: wrap; }
+  .faq-num { width: 34px; height: 34px; }
+  .trip-hero { padding: 0.85rem; gap: 0.5rem; }
+  .trip-hero strong { font-size: 1.1rem; }
+  .inline-form { flex-direction: column; }
+  .details { grid-template-columns: 92px 1fr; }
+  .hero-title, .hero-highlight { font-size: 1.35rem; }
+
+  /* Modals become a sheet pinned to the bottom of the screen */
+  .modal-backdrop { align-items: flex-end; padding: 0; }
+  .modal { max-width: none; border-radius: var(--radius-lg) var(--radius-lg) 0 0; max-height: 92vh; overflow-y: auto; }
+  .modal-header { position: sticky; top: 0; z-index: 1; background: var(--white); padding: 0.9rem 1rem; }
+  .modal-body { padding: 1rem; }
+  .modal-footer { padding: 0.85rem 1rem; flex-wrap: wrap; }
+  .modal-footer > .btn { flex: 1 1 auto; }
+  .modal-footer-inline { margin: 1rem -1rem -1rem; }
+
+  .login-card { padding: 1.5rem 1.25rem; }
+}
+
+@media (max-width: 380px) {
+  .stat-grid, .pay-grid { grid-template-columns: 1fr; }
+  .table-stack tr { grid-template-columns: 1fr; }
 }

@@ -152,7 +152,8 @@ function BookingList({ open }: { open: (id: string) => void }) {
           <Empty text="No bookings match these filters." />
         ) : (
           <div className="table-wrap">
-            <table className="table">
+            {/* On phones each row becomes a card; data-label names each value */}
+            <table className="table table-stack">
               <thead>
                 <tr>
                   <th>Booking</th>
@@ -167,34 +168,34 @@ function BookingList({ open }: { open: (id: string) => void }) {
               <tbody>
                 {filtered.map((b) => (
                   <tr key={b.id} className="row-link" onClick={() => open(b.id)}>
-                    <td>
+                    <td data-label="Booking">
                       <div className="strong mono">{b.id}</div>
                       <div className="muted">{formatDateTime(b.createdAt)}</div>
                     </td>
-                    <td>
+                    <td data-label="Customer">
                       <div className="strong">{b.customerName}</div>
                       <div className="muted">{b.phone}</div>
                     </td>
-                    <td>
+                    <td data-label="Travel dates">
                       <div className="strong">{formatDateRange(b)}</div>
                       <div className="muted">
                         {tripDays(b)} day{tripDays(b) > 1 ? 's' : ''} · {b.passengers} pax
                       </div>
                     </td>
-                    <td>
+                    <td data-label="Bus / trip">
                       <div className="strong">{busName(b.busId)}</div>
                       <div className="muted">
                         {b.from} → {b.to}
                       </div>
                     </td>
-                    <td>
+                    <td data-label="Amount">
                       <div className="strong">{inr(b.totalAmount)}</div>
                       <Badge value={b.paymentStatus} label={`${b.paymentStatus.toLowerCase()}${b.advancePaid ? ` · ${inr(b.advancePaid)}` : ''}`} />
                     </td>
-                    <td onClick={(e) => e.stopPropagation()}>
+                    <td data-label="Status" onClick={(e) => e.stopPropagation()}>
                       <StatusSelect booking={b} onChange={(s) => save({ ...b, status: s })} />
                     </td>
-                    <td>
+                    <td className="table-stack-arrow">
                       <div className="row-actions">
                         <ArrowRight size={16} className="row-link-arrow" />
                       </div>

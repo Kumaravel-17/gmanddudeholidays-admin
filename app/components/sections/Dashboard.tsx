@@ -67,7 +67,7 @@ export default function Dashboard({ goTo }: { goTo: (tab: string) => void }) {
             <Empty text="No upcoming trips." />
           ) : (
             <div className="table-wrap">
-              <table className="table">
+              <table className="table table-stack">
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -80,18 +80,18 @@ export default function Dashboard({ goTo }: { goTo: (tab: string) => void }) {
                 <tbody>
                   {upcoming.map((b) => (
                     <tr key={b.id} className="row-link" onClick={() => goTo(`bookings/${b.id}`)}>
-                      <td>
+                      <td data-label="Date">
                         <div className="strong">{formatDateRange(b)}</div>
                         <div className="muted">
                           {tripDays(b)} day{tripDays(b) > 1 ? 's' : ''}
                         </div>
                       </td>
-                      <td>{b.customerName}</td>
-                      <td>{busName(b.busId)}</td>
-                      <td>
+                      <td data-label="Customer">{b.customerName}</td>
+                      <td data-label="Bus">{busName(b.busId)}</td>
+                      <td data-label="Trip">
                         {b.from} → {b.to}
                       </td>
-                      <td>
+                      <td data-label="Status">
                         <Badge value={b.status} />
                       </td>
                     </tr>
