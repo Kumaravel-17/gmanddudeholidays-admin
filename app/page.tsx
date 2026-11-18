@@ -29,9 +29,11 @@ const SUB_TABS: Record<string, { id: string; label: string }[]> = {
 
 const SECTIONS = [...NAV.map((n) => n.id), 'settings'];
 
-// Accepts "section" or "section/sub", e.g. "website/faqs". For bookings, sub is a booking id.
+// Accepts "section" or "section/sub", e.g. "website/faqs". For bookings, sub is "list",
+// "bus/<busId>" (that bus's 30-day calendar) or a booking id.
 function parseView(view: string) {
-  const [tab, sub = ''] = view.split('/');
+  const [tab, ...rest] = view.split('/');
+  const sub = rest.join('/');
   if (!SECTIONS.includes(tab)) return null;
   if (tab === 'bookings') return { tab, sub: decodeURIComponent(sub) };
   const subs = SUB_TABS[tab];

@@ -178,6 +178,12 @@ export function addActivity(b: Booking, entries: ActivityEntry[], by: string): B
   return { ...b, activity: [...(b.activity ?? []), ...added] };
 }
 
+// The website stores the photo crop as a Tailwind class, e.g. "object-[center_55%]" → "center 55%".
+export function objectPosition(cls: string) {
+  const m = /^object-\[(.+)\]$/.exec(cls ?? '');
+  return m ? m[1].replace(/_/g, ' ') : 'center 60%';
+}
+
 export function digits(phone: string) {
   return phone.replace(/\D/g, '');
 }

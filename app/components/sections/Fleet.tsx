@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Pencil, Trash2, Users } from 'lucide-react';
-import { inr, slugify, useStore } from '../../lib/store';
+import { inr, objectPosition, slugify, useStore } from '../../lib/store';
 import { AMENITIES, Bus, BUS_TYPES, BusType } from '../../lib/types';
 import { AddButton, Badge, CheckGroup, confirmDelete, Empty, Field, FormModal, ListEditor, PageHeader } from '../ui';
 
@@ -55,7 +55,7 @@ export default function Fleet() {
               <div className="bus-photo">
                 {bus.images[0] ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={bus.images[0]} alt={bus.name} />
+                  <img src={bus.images[0]} alt={bus.name} style={{ objectPosition: objectPosition(bus.imagePosition) }} />
                 ) : (
                   <span>No photo</span>
                 )}

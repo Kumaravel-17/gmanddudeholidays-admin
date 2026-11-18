@@ -1,12 +1,16 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
   Bus,
   CalendarDays,
+  ChevronLeft,
+  ChevronRight,
   CircleDollarSign,
+  LayoutGrid,
+  List,
   MessageCircle,
   NotebookPen,
   Pencil,
@@ -22,16 +26,18 @@ import {
   datesOverlap,
   describeChanges,
   digits,
+  formatDate,
   formatDateRange,
   formatDateTime,
   inr,
   newId,
   nowLocal,
+  objectPosition,
   tripDays,
   useStore,
 } from '../../lib/store';
-import { ActivityKind, Booking, BOOKING_STATUSES, BookingStatus, PAYMENT_STATUSES, PaymentStatus } from '../../lib/types';
-import { AddButton, Badge, Card, confirmDelete, Empty, Field, FormModal, PageHeader, SearchBox } from '../ui';
+import { ActivityKind, Booking, BOOKING_STATUSES, BookingStatus, Bus as BusInfo, PAYMENT_STATUSES, PaymentStatus } from '../../lib/types';
+import { AddButton, Badge, Card, confirmDelete, Empty, Field, FormModal, Modal, PageHeader, SearchBox } from '../ui';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -46,7 +52,7 @@ const blank = (busId: string): Booking => ({
   passengers: 1,
   date: today(),
   endDate: today(),
-  status: 'PENDING',
+  status: 'CONFIRMED', // the admin is taking the booking directly, so it's confirmed unless changed
   paymentStatus: 'UNPAID',
   createdAt: '',
   activity: [],
@@ -74,21 +80,429 @@ function useBookingActions() {
   return { save, addNote, remove: (id: string) => remove('bookings', id), busName };
 }
 
-export default function Bookings({ bookingId, goTo }: { bookingId: string; goTo: (view: string) => void }) {
+// sub: "" → pick a bus, "list" → table of all bookings, "bus/<id>" → that bus's calendar, anything else → a booking id.
+export default function Bookings({ bookingId: sub, goTo }: { bookingId: string; goTo: (view: string) => void }) {
   const { data } = useStore();
-  const booking = bookingId ? data.bookings.find((b) => b.id === bookingId) : undefined;
+  const openBooking = (id: string) => goTo(`bookings/${encodeURIComponent(id)}`);
 
-  if (bookingId && booking) return <BookingDetails booking={booking} onBack={() => goTo('bookings')} />;
-  if (bookingId)
+  if (!sub || sub === 'list')
     return (
       <>
-        <button className="btn btn-ghost btn-sm back-btn" onClick={() => goTo('bookings')}>
-          <ArrowLeft size={15} /> All bookings
-        </button>
-        <Empty text={`Booking ${bookingId} was not found. It may have been deleted.`} />
+        <PageHeader title="Bookings" subtitle="Pick a bus to see its next 30 days. Click a booked day for the customer's details." />
+        <div className="toolbar">
+          <div className="segmented">
+            <button className={!sub ? 'active' : ''} onClick={() => goTo('bookings')}>
+              <LayoutGrid size={14} /> By bus
+            </button>
+            <button className={sub === 'list' ? 'active' : ''} onClick={() => goTo('bookings/list')}>
+              <List size={14} /> All bookings <span>{data.bookings.length}</span>
+            </button>
+          </div>
+        </div>
+        {sub ? <BookingList open={openBooking} /> : <BusPicker open={(id) => goTo(`bookings/bus/${id}`)} />}
       </>
     );
-  return <BookingList open={(id) => goTo(`bookings/${id}`)} />;
+
+  if (sub.startsWith('bus/')) {
+    const busId = sub.slice(4);
+    const bus = data.buses.find((b) => b.id === busId);
+    if (!bus)
+      return (
+        <>
+          <button className="btn btn-ghost btn-sm back-btn" onClick={() => goTo('bookings')}>
+            <ArrowLeft size={15} /> All buses
+          </button>
+          <Empty text={`Bus ${busId} was not found.`} />
+        </>
+      );
+    return <BusCalendar bus={bus} goTo={goTo} openBooking={openBooking} />;
+  }
+
+  const booking = data.bookings.find((b) => b.id === sub);
+  if (booking) return <BookingDetails booking={booking} onBack={() => goTo(`bookings/bus/${booking.busId}`)} />;
+  return (
+    <>
+      <button className="btn btn-ghost btn-sm back-btn" onClick={() => goTo('bookings')}>
+        <ArrowLeft size={15} /> All buses
+      </button>
+      <Empty text={`Booking ${sub} was not found. It may have been deleted.`} />
+    </>
+  );
+}
+
+// ---------- 30-day calendar per bus ----------
+
+const CALENDAR_DAYS = 30;
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// YYYY-MM-DD in the admin's own time zone (toISOString would give UTC, a day off in early IST mornings).
+function localDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function nextDays(count: number) {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  return Array.from({ length: count }, (_, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    return d;
+  });
+}
+
+// The booking holding this bus on this date; cancelled bookings free the day.
+function bookingOn(bookings: Booking[], busId: string, iso: string) {
+  return bookings.find((b) => b.busId === busId && b.status !== 'CANCELLED' && datesOverlap(b, { date: iso, endDate: iso }));
+}
+
+// Tracks the pointer over the calendar as --px/--py (-1…1) for the CSS parallax. Written straight to
+// the element's style in a frame callback, so moving the mouse doesn't re-render the calendar.
+function useParallax() {
+  const frame = useRef(0);
+  const set = (el: HTMLElement, x: number, y: number) => {
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => {
+      el.style.setProperty('--px', x.toFixed(3));
+      el.style.setProperty('--py', y.toFixed(3));
+    });
+  };
+  return {
+    onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
+      if (e.pointerType !== 'mouse') return;
+      const r = e.currentTarget.getBoundingClientRect();
+      set(e.currentTarget, ((e.clientX - r.left) / r.width) * 2 - 1, ((e.clientY - r.top) / r.height) * 2 - 1);
+    },
+    onPointerLeave: (e: React.PointerEvent<HTMLElement>) => set(e.currentTarget, 0, 0),
+  };
+}
+
+type DayState = 'free' | 'booked' | 'pending';
+const dayState = (b?: Booking): DayState => (!b ? 'free' : b.status === 'PENDING' ? 'pending' : 'booked');
+
+function BusPicker({ open }: { open: (busId: string) => void }) {
+  const { data } = useStore();
+  const days = useMemo(() => nextDays(CALENDAR_DAYS).map(localDate), []);
+  const todayIso = days[0];
+
+  if (data.buses.length === 0) return <Empty text="No buses yet. Add one under Fleet." />;
+
+  return (
+    <div className="bus-grid">
+      {data.buses.map((bus) => {
+        const taken = days.filter((d) => bookingOn(data.bookings, bus.id, d)).length;
+        const todayBooking = bookingOn(data.bookings, bus.id, todayIso);
+        const next = data.bookings
+          .filter((b) => b.busId === bus.id && b.status !== 'CANCELLED' && (b.endDate || b.date) >= todayIso)
+          .sort((a, b) => a.date.localeCompare(b.date))[0];
+        return (
+          <button key={bus.id} type="button" className="bus-card pick-card" onClick={() => open(bus.id)}>
+            <div className="bus-photo">
+              {bus.images[0] ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={bus.images[0]} alt={bus.name} style={{ objectPosition: objectPosition(bus.imagePosition) }} />
+              ) : (
+                <span>No photo</span>
+              )}
+              <span className={`pick-today pick-today-${dayState(todayBooking)}`}>
+                {todayBooking ? `${todayBooking.status === 'PENDING' ? 'Pending' : 'Booked'} today` : 'Free today'}
+              </span>
+            </div>
+            <div className="bus-body">
+              <div className="bus-title">
+                <div>
+                  <h3>{bus.name}</h3>
+                  <div className="muted">
+                    {bus.type} · {bus.seats} {bus.type === 'AC Sleeper' ? 'berths' : 'seats'}
+                  </div>
+                </div>
+                {bus.status === 'MAINTENANCE' && <Badge value={bus.status} />}
+              </div>
+              <div className="pick-occupancy">
+                <div className="pick-occupancy-label">
+                  <span>Next {CALENDAR_DAYS} days</span>
+                  <strong>
+                    {taken} booked · {CALENDAR_DAYS - taken} free
+                  </strong>
+                </div>
+                <div className="pay-track">
+                  <span className="pick-track-fill" style={{ width: `${(taken / CALENDAR_DAYS) * 100}%` }} />
+                </div>
+              </div>
+              <div className="pick-footer">
+                <span className="muted">{next ? `Next: ${formatDateRange(next)} · ${next.customerName}` : 'No upcoming bookings'}</span>
+                <ArrowRight size={16} className="row-link-arrow" />
+              </div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function BusCalendar({ bus, goTo, openBooking }: { bus: BusInfo; goTo: (view: string) => void; openBooking: (id: string) => void }) {
+  const { data } = useStore();
+  const { save } = useBookingActions();
+  const [selected, setSelected] = useState<Booking | null>(null);
+  const [creating, setCreating] = useState<Booking | null>(null);
+
+  const todayIso = localDate(new Date());
+  // First day of the month on screen; starts on the current month.
+  const [month, setMonth] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  // Which way the last month change went, so the new month slides in from that side.
+  const [dir, setDir] = useState<'next' | 'prev'>('next');
+  const goMonth = (target: Date) => {
+    setDir(target < month ? 'prev' : 'next');
+    setMonth(target);
+  };
+  const shiftMonth = (by: number) => goMonth(new Date(month.getFullYear(), month.getMonth() + by, 1));
+  const parallax = useParallax();
+  const isCurrentMonth = localDate(month).slice(0, 7) === todayIso.slice(0, 7);
+
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const cells = Array.from({ length: daysInMonth }, (_, i) => {
+    const d = new Date(month.getFullYear(), month.getMonth(), i + 1);
+    const iso = localDate(d);
+    const booking = bookingOn(data.bookings, bus.id, iso);
+    return { d, iso, booking, state: dayState(booking), past: iso < todayIso };
+  });
+  // Pad the start so each date sits under its weekday.
+  const grid: (typeof cells[number] | null)[] = [...Array(month.getDay()).fill(null), ...cells];
+  const monthLabel = month.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
+  // Past free days can't be booked any more, so they don't count as free.
+  const count = (s: DayState) => cells.filter((c) => c.state === s && !(s === 'free' && c.past)).length;
+  // Read the selected booking from the store so the modal shows its latest data.
+  const current = selected ? data.bookings.find((b) => b.id === selected.id) ?? null : null;
+
+  return (
+    <>
+      <button className="btn btn-ghost btn-sm back-btn" onClick={() => goTo('bookings')}>
+        <ArrowLeft size={15} /> All buses
+      </button>
+
+      {/* Bus switcher, like the show-time chips on a ticketing site */}
+      <div className="bus-switcher" role="tablist" aria-label="Choose bus">
+        {data.buses.map((b) => (
+          <button
+            key={b.id}
+            role="tab"
+            aria-selected={b.id === bus.id}
+            className={`bus-chip ${b.id === bus.id ? 'active' : ''}`}
+            onClick={() => goTo(`bookings/bus/${b.id}`)}
+          >
+            {b.images[0] && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={b.images[0]} alt="" />
+            )}
+            <span>{b.name}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="page-header">
+        <div>
+          <h1>{bus.name}</h1>
+          <p>
+            {bus.type} · {bus.seats} {bus.type === 'AC Sleeper' ? 'berths' : 'seats'} · {inr(bus.pricePerKm)}/km
+            {bus.registrationNumber && ` · ${bus.registrationNumber}`}
+          </p>
+        </div>
+        <div className="cal-stats" title={`Days in ${monthLabel}`}>
+          <span>
+            <strong>{count('booked')}</strong> booked
+          </span>
+          <span>
+            <strong>{count('pending')}</strong> pending
+          </span>
+          <span>
+            <strong>{count('free')}</strong> free
+          </span>
+        </div>
+      </div>
+
+      <div className="cal-stage" {...parallax}>
+      <Card className="cal-card">
+        <div className="cal-nav">
+          <button className="icon-btn" onClick={() => shiftMonth(-1)} aria-label="Previous month">
+            <ChevronLeft size={18} />
+          </button>
+          <h2 className={`cal-month-title cal-title-${dir}`} key={monthLabel}>
+            {monthLabel}
+          </h2>
+          <button className="icon-btn" onClick={() => shiftMonth(1)} aria-label="Next month">
+            <ChevronRight size={18} />
+          </button>
+          {!isCurrentMonth && (
+            <button className="btn btn-ghost btn-sm cal-nav-today" onClick={() => goMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>
+              Today
+            </button>
+          )}
+        </div>
+        <div className={`cal-grid cal-in-${dir}`} key={localDate(month)}>
+          {WEEKDAYS.map((w) => (
+            <span key={w} className="cal-weekday">
+              {w}
+            </span>
+          ))}
+          {grid.map((c, i) =>
+            c ? (
+              <button
+                key={c.iso}
+                type="button"
+                // Diagonal wave on entry; booked days float higher in the parallax than free or past ones.
+                style={
+                  {
+                    '--wave': `${(Math.floor(i / 7) + (i % 7)) * 28}ms`,
+                    '--depth': c.booking ? 7 : c.past ? 2 : 4,
+                  } as React.CSSProperties
+                }
+                disabled={c.past && !c.booking}
+                className={`cal-day cal-${c.state} ${c.past ? 'cal-past' : ''} ${c.iso === todayIso ? 'cal-today' : ''} ${
+                  (current && c.booking?.id === current.id) || (!creating?.id && creating?.date === c.iso) ? 'cal-selected' : ''
+                }`}
+                title={
+                  c.booking
+                    ? `${formatDate(c.iso)} · ${c.booking.customerName} (${c.booking.status.toLowerCase()})`
+                    : c.past
+                      ? formatDate(c.iso)
+                      : `${formatDate(c.iso)} · free, click to book`
+                }
+                onClick={() =>
+                  c.booking
+                    ? setSelected(c.booking)
+                    : setCreating({ ...blank(bus.id), date: c.iso, endDate: c.iso, passengers: 1 })
+                }
+              >
+                <span className="cal-day-num">{c.d.getDate()}</span>
+                <span className="cal-day-label">
+                  {c.booking ? c.booking.customerName.split(' ')[0] : c.iso === todayIso ? 'Today' : c.past ? '—' : 'Free'}
+                </span>
+              </button>
+            ) : (
+              <span key={`pad-${i}`} className="cal-pad" />
+            ),
+          )}
+        </div>
+
+        <div className="cal-legend">
+          <span>
+            <i className="cal-swatch cal-free" /> Available
+          </span>
+          <span>
+            <i className="cal-swatch cal-pending" /> Pending
+          </span>
+          <span>
+            <i className="cal-swatch cal-booked" /> Booked
+          </span>
+        </div>
+      </Card>
+      </div>
+
+      {current && (
+        <CustomerModal
+          booking={current}
+          bus={bus}
+          onClose={() => setSelected(null)}
+          onOpen={() => openBooking(current.id)}
+        />
+      )}
+
+      {creating && (
+        <BookingForm
+          initial={creating}
+          onClose={() => setCreating(null)}
+          onSave={(b) => {
+            save(b);
+            setCreating(null);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+// Quick look at who booked the day, without leaving the calendar.
+function CustomerModal({ booking: b, bus, onClose, onOpen }: { booking: Booking; bus: BusInfo; onClose: () => void; onOpen: () => void }) {
+  const paid = b.advancePaid ?? 0;
+  const balance = Math.max(0, (b.totalAmount ?? 0) - paid);
+  const days = tripDays(b);
+  return (
+    <Modal
+      title="Customer details"
+      onClose={onClose}
+      footer={
+        <>
+          <a className="btn btn-ghost" href={`tel:+${digits(b.phone)}`}>
+            <Phone size={15} /> Call
+          </a>
+          <a className="btn btn-ghost" href={`https://wa.me/${digits(b.phone)}`} target="_blank" rel="noopener noreferrer">
+            <MessageCircle size={15} /> WhatsApp
+          </a>
+          <button className="btn btn-primary" onClick={onOpen}>
+            Full booking <ArrowRight size={15} />
+          </button>
+        </>
+      }
+    >
+      <div className="cust-head">
+        <div className="cust-avatar">{b.customerName.trim().charAt(0).toUpperCase() || '?'}</div>
+        <div>
+          <div className="cust-name">{b.customerName}</div>
+          <div className="muted mono">{b.id}</div>
+        </div>
+        <Badge value={b.status} />
+      </div>
+
+      <dl className="details details-wide">
+        <dt>
+          <Phone size={14} /> Phone
+        </dt>
+        <dd>
+          <a href={`tel:+${digits(b.phone)}`}>{b.phone}</a>
+        </dd>
+        <dt>Email</dt>
+        <dd>{b.email ? <a href={`mailto:${b.email}`}>{b.email}</a> : '—'}</dd>
+        <dt>
+          <RouteIcon size={14} /> Trip
+        </dt>
+        <dd>
+          {b.from} → {b.to}
+        </dd>
+        <dt>
+          <CalendarDays size={14} /> Dates
+        </dt>
+        <dd>
+          {formatDateRange(b)}
+          <span className="muted">
+            {' '}
+            · {days} day{days > 1 ? 's' : ''}
+          </span>
+        </dd>
+        <dt>
+          <Users size={14} /> Passengers
+        </dt>
+        <dd>
+          {b.passengers} <span className="muted">of {bus.seats}</span>
+        </dd>
+        <dt>
+          <CircleDollarSign size={14} /> Amount
+        </dt>
+        <dd>
+          {inr(b.totalAmount)} <span className="muted">· paid {inr(paid)}</span>
+          {balance > 0 && <span className="text-red"> · due {inr(balance)}</span>}
+        </dd>
+        <dt>Payment</dt>
+        <dd>
+          <Badge value={b.paymentStatus} />
+        </dd>
+      </dl>
+      {b.notes && <div className="message-body">{b.notes}</div>}
+    </Modal>
+  );
 }
 
 function BookingList({ open }: { open: (id: string) => void }) {
@@ -113,13 +527,8 @@ function BookingList({ open }: { open: (id: string) => void }) {
 
   return (
     <>
-      <PageHeader
-        title="Bookings"
-        subtitle="Whole-bus hire, booked by date. Click a booking to see its details and activity."
-        action={<AddButton label="New booking" onClick={() => setEditing(blank(buses[0]?.id ?? ''))} />}
-      />
-
       <div className="toolbar">
+        <AddButton label="New booking" onClick={() => setEditing(blank(buses[0]?.id ?? ''))} />
         <SearchBox value={query} onChange={setQuery} placeholder="Search name, phone, city, ID…" />
         <select className="input input-auto" value={busFilter} onChange={(e) => setBusFilter(e.target.value)}>
           <option value="ALL">All buses</option>
@@ -561,6 +970,8 @@ function BookingForm({ initial, onClose, onSave }: { initial: Booking; onClose: 
           className="input"
           type="date"
           required
+          // New bookings can't start in the past; old bookings keep their dates when edited.
+          min={initial.id ? undefined : localDate(new Date())}
           value={b.date}
           onChange={(e) => setB((x) => ({ ...x, date: e.target.value, endDate: x.endDate < e.target.value ? e.target.value : x.endDate }))}
         />
